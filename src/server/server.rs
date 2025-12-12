@@ -1,7 +1,8 @@
 use crate::{
     config::AppConfig,
     feeds::watcher::{FeedEvent, RssManager},
-    server::commands::ServerCommand,
+    reply_err, reply_ok,
+    server::commands::{CommandMessage, ServerCommand},
 };
 use std::time::Duration;
 
@@ -10,7 +11,10 @@ use reqwest::Client;
 use serde_json::json;
 use tokio::{
     select,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        mpsc::{self},
+        oneshot,
+    },
 };
 use {
     interprocess::local_socket::{
@@ -20,6 +24,7 @@ use {
     tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
 };
 
+// For now this is just using discord. This is mainly a placeholder function
 async fn handle_event(event: FeedEvent, webhook: Option<&str>, client: &Client) {
     let title = event
         .item
@@ -61,8 +66,7 @@ pub async fn start(cfg: AppConfig) -> Result<(), Box<dyn std::error::Error + Sen
         &cfg.database.path,
         &feeds,
         cfg.feeds.queue,
-        // Might? panic
-        Duration::from_secs(cfg.feeds.refresh_interval as u64),
+        Duration::from_secs(cfg.feeds.refresh_interval.try_into()?),
     )
     .await?;
 
@@ -75,34 +79,49 @@ pub async fn start(cfg: AppConfig) -> Result<(), Box<dyn std::error::Error + Sen
     }
     let mut command_recv = create_ipc_listener(&cfg.socket)?;
     let client = Client::new();
-    // Main loop
     loop {
         select! {
             maybe_event = manager.next() => {
-                // Main logic of what to do with events goes here
                 if let Some(e) = maybe_event {
                     handle_event(e, cfg.webhook.as_deref(), &client).await;
                 }
             }
             cmd = command_recv.recv() => {
-                if let Some(command) = cmd {
-                    match command {
+                if let Some(CommandMessage { cmd, reply: tx }) = cmd {
+                    match cmd {
                         ServerCommand::AddFeed(feed) => {
-                            if let Err(e) = manager.add_feed(&feed).await {
-                                error!("Error adding feed: {:?}", e);
-                                continue;
+                            match manager.add_feed(&feed).await {
+                                Ok(new) => {
+                                    let msg = if new { "Added" } else { "Did not add" };
+                                    reply_ok!(tx, "{} feed: {}", msg, feed);
+                                }
+                                Err(e) => {
+                                    reply_err!(tx, "Could not add feed: {:?}", e);
+                                    continue;
+                                }
                             }
-                            info!("Added {} feed", feed)
                         },
+
                         ServerCommand::RemoveFeed(feed) => {
                             if !manager.remove_feed(&feed).await {
-                                error!("Feed does not exist");
+                                reply_err!(tx, "Feed is not being followed");
                                 continue;
                             }
-                            info!("Removed {} feed", feed)
+                            reply_ok!(tx, "Removed {} feed", feed);
                         },
-                        // Branches are handled in the listener
-                        _ => warn!("This branch should never be hit"),
+
+                        ServerCommand::GetFeeds => {
+                            let feeds = manager.feeds().join(", ");
+                            reply_ok!(tx, "Returning feeds: {}", &feeds)
+                        },
+
+                        _ => {
+                            if let Some(msg) = cmd.format_reply() {
+                                reply_ok!(tx, "{}", msg);
+                                continue;
+                            }
+                            reply_ok!(tx, "No reply");
+                        }
                     }
                 }
             }
@@ -113,10 +132,10 @@ pub async fn start(cfg: AppConfig) -> Result<(), Box<dyn std::error::Error + Sen
 
 fn create_ipc_listener(
     socket_name: &str,
-) -> Result<Receiver<ServerCommand>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<mpsc::Receiver<CommandMessage>, Box<dyn std::error::Error + Send + Sync>> {
     let name = socket_name.to_ns_name::<GenericNamespaced>()?;
     let listener = ListenerOptions::new().name(name).create_tokio()?;
-    let (send, recv) = mpsc::channel(300);
+    let (command_send, command_recv) = mpsc::channel(300);
 
     info!("Listening for commands on {}", socket_name);
     tokio::spawn(async move {
@@ -124,54 +143,74 @@ fn create_ipc_listener(
             let conn = match listener.accept().await {
                 Ok(c) => c,
                 Err(e) => {
-                    error!("Error creating listener: {}", e);
+                    error!("Error accepting connection: {}", e);
                     continue;
                 }
             };
-            let tx = send.clone();
 
-            tokio::spawn(async move {
-                if let Some(cmd) = parse_message(conn).await {
-                    if tx.send(cmd).await.is_err() {
-                        error!("Error sending command")
-                    }
-                }
-            });
+            let tx = command_send.clone();
+            tokio::spawn(handle_connection(conn, tx));
         }
     });
 
-    return Ok(recv);
+    Ok(command_recv)
 }
 
-async fn parse_message(conn: Stream) -> Option<ServerCommand> {
+async fn handle_connection(conn: Stream, command_tx: mpsc::Sender<CommandMessage>) {
     let mut recver = BufReader::new(&conn);
     let mut sender = &conn;
     let mut buffer = String::with_capacity(2048);
 
-    if recver.read_line(&mut buffer).await.ok()? == 0 {
-        return None;
-    }
-    debug!("Client sent: {}", &buffer);
-
-    match ServerCommand::try_from(buffer.trim().to_string()) {
-        Ok(cmd) => {
-            if let Some(reply) = cmd.format_reply() {
-                // Send the correct reply
-                if sender.write_all(reply.as_bytes()).await.is_err() {
-                    error!("Failed to send reply");
-                }
-                None
-            } else {
-                // Default to ACK
-                if sender.write_all(b"ACK").await.is_err() {
-                    error!("Failed to send ACK");
-                }
-                Some(cmd)
-            }
+    // Reads input from the client
+    buffer.clear();
+    match recver.read_line(&mut buffer).await {
+        Ok(0) => {
+            debug!("Client disconnected");
+            return;
         }
+        Ok(_) => {}
+        Err(e) => {
+            error!("Failed to read from client: {}", e);
+            return;
+        }
+    }
+    debug!("Client sent: {}", &buffer.trim());
+
+    // Parse input
+    let cmd = match ServerCommand::try_from(buffer.trim().to_string()) {
+        Ok(c) => c,
         Err(e) => {
             error!("Error converting buffer to command: {:?}", e);
-            None
+            let _ = sender.write_all(b"ERR invalid command\n").await;
+            return;
+        }
+    };
+
+    // Send upstream
+    let (reply_tx, reply_rx) = oneshot::channel::<String>();
+    if command_tx
+        .send(CommandMessage {
+            cmd,
+            reply: reply_tx,
+        })
+        .await
+        .is_err()
+    {
+        error!("Failed to forward command to server");
+        let _ = sender.write_all(b"ERR internal\n").await;
+        return;
+    }
+
+    // Waits for a reply from the upstream server
+    match reply_rx.await {
+        Ok(reply) => {
+            if let Err(e) = sender.write_all(reply.as_bytes()).await {
+                error!("Failed to send reply to client: {}", e);
+            }
+        }
+        Err(_canceled) => {
+            error!("Reply channel dropped before sending response");
+            let _ = sender.write_all(b"ERR no-reply\n").await;
         }
     }
 }
