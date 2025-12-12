@@ -125,6 +125,10 @@ impl RssManager {
     pub fn len(&self) -> usize {
         self.feed_list.len()
     }
+
+    pub fn feeds(&self) -> Vec<String> {
+        self.feed_list.iter().map(|(f, _)| f.to_string()).collect()
+    }
 }
 
 pub async fn resolve_feeds(feeds: Vec<String>) -> (Vec<RssFeed>, Vec<String>) {
