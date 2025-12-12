@@ -60,7 +60,7 @@ async fn handle_event(event: FeedEvent, webhook: Option<&str>, client: &Client) 
 }
 
 pub async fn start(cfg: AppConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    info!("Starting RSS watcher");
+    info!("Starting RSS watcher server");
     let feeds = cfg.feeds.get();
     let (mut manager, failed_urls) = RssManager::new(
         &cfg.database.path,
