@@ -56,7 +56,7 @@ async fn main() {
                 }
             }
             Err(e) => {
-                eprintln!("{} {:?}", "Error parsing command:".red().bold(), e);
+                eprintln!("{} {}", "Error parsing command:".red().bold(), e);
             }
         }
     }

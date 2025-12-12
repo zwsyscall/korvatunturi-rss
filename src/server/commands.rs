@@ -1,3 +1,4 @@
+use std::fmt::Display;
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub enum ServerCommand {
@@ -13,6 +14,23 @@ pub enum CommandParseError {
     UnknownKeyword,
     NotLongEnough,
     MissingLink,
+}
+
+impl Display for CommandParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            CommandParseError::MissingKeyword => "Missing keyword",
+            CommandParseError::UnknownKeyword => "Unknown keyword",
+            CommandParseError::NotLongEnough => "Command not long enough",
+            CommandParseError::MissingLink => "Missing link",
+        };
+        write!(f, "{}", text)
+    }
+}
+
+pub struct CommandMessage {
+    pub cmd: ServerCommand,
+    pub reply: oneshot::Sender<String>,
 }
 
 impl TryFrom<String> for ServerCommand {
