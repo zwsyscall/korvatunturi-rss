@@ -81,22 +81,26 @@ impl RssManager {
     pub async fn add_feed(
         &mut self,
         url: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let feed = RssFeed::new(url.to_string(), 300).await?;
-        self.seen_store.push_feeds(vec![feed.source()]).await;
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        if self.feed_list.contains_key(url) {
+            return Ok(false);
+        }
 
-        self.feed_list.insert(
+        let feed = RssFeed::new(url.to_string(), 300).await?;
+        let changed = self.seen_store.push_feeds(vec![feed.source()]).await;
+
+        let old = self.feed_list.insert(
             feed.source(),
             feed_refresh_loop(
                 self.event_sender.clone(),
                 Arc::clone(&self.seen_store),
                 feed,
-                self.normal_sleep.clone(),
-                self.fail_sleep.clone(),
+                self.normal_sleep,
+                self.fail_sleep,
             ),
         );
 
-        Ok(())
+        Ok(changed > 0 && old.is_none())
     }
 
     // Maybe remove it from the feeds thing too? idk
