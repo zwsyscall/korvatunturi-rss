@@ -59,8 +59,8 @@ impl RssManager {
                     send.clone(),
                     Arc::clone(&seen_mutex),
                     feed,
-                    sleep_interval.clone(),
-                    fail_sleep.clone(),
+                    sleep_interval,
+                    fail_sleep,
                 ),
             );
         }
