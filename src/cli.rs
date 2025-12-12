@@ -58,7 +58,13 @@ pub async fn send_command(cfg: AppConfig, command: ServerCommand) -> io::Result<
 
     let mut buffer = String::with_capacity(2048);
     conn.read_to_string(&mut buffer).await?;
-    println!("{} {}", "Reply:".green().bold(), &buffer);
+
+    let result = match &buffer[..4] {
+        "ACK " => "Ok: ".green().bold(),
+        "ERR " => "Error: ".red().bold(),
+        _ => "Unknown: ".yellow().bold(),
+    };
+    println!("{} {}", result, &buffer[4..]);
 
     Ok(())
 }

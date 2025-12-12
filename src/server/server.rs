@@ -93,10 +93,10 @@ pub async fn start(cfg: AppConfig) -> Result<(), Box<dyn std::error::Error + Sen
                             match manager.add_feed(&feed).await {
                                 Ok(new) => {
                                     let msg = if new { "Added" } else { "Did not add" };
-                                    reply_ok!(tx, "{} feed: {}", msg, feed);
+                                    reply_ok!(tx, "ACK {} feed: {}", msg, feed);
                                 }
                                 Err(e) => {
-                                    reply_err!(tx, "Could not add feed: {:?}", e);
+                                    reply_err!(tx, "ERR Could not add feed: {:?}", e);
                                     continue;
                                 }
                             }
@@ -104,23 +104,23 @@ pub async fn start(cfg: AppConfig) -> Result<(), Box<dyn std::error::Error + Sen
 
                         ServerCommand::RemoveFeed(feed) => {
                             if !manager.remove_feed(&feed).await {
-                                reply_err!(tx, "Feed is not being followed");
+                                reply_err!(tx, "ERR Feed is not being followed");
                                 continue;
                             }
-                            reply_ok!(tx, "Removed {} feed", feed);
+                            reply_ok!(tx, "ACK Removed {} feed", feed);
                         },
 
                         ServerCommand::GetFeeds => {
                             let feeds = manager.feeds().join(", ");
-                            reply_ok!(tx, "Returning feeds: {}", &feeds)
+                            reply_ok!(tx, "ACK Returning feeds: {}", &feeds)
                         },
 
                         _ => {
                             if let Some(msg) = cmd.format_reply() {
-                                reply_ok!(tx, "{}", msg);
+                                reply_ok!(tx, "ACK {}", msg);
                                 continue;
                             }
-                            reply_ok!(tx, "No reply");
+                            reply_ok!(tx, "ACK No reply");
                         }
                     }
                 }
