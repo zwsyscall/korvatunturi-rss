@@ -1,9 +1,12 @@
 use std::fmt::Display;
+
+use tokio::sync::oneshot;
 pub static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub enum ServerCommand {
     AddFeed(String),
     RemoveFeed(String),
+    GetFeeds,
     Ping,
     Version,
 }
@@ -58,6 +61,7 @@ impl TryFrom<String> for ServerCommand {
                 },
                 "ping" => ServerCommand::Ping,
                 "version" => ServerCommand::Version,
+                "list" => ServerCommand::GetFeeds,
                 _ => return Err(CommandParseError::MissingKeyword),
             };
             return Ok(command);
@@ -77,6 +81,7 @@ impl ServerCommand {
             }
             ServerCommand::Ping => "ping".to_string(),
             ServerCommand::Version => "version".to_string(),
+            ServerCommand::GetFeeds => "list".to_string(),
         }
     }
 
@@ -84,6 +89,7 @@ impl ServerCommand {
         match &self {
             ServerCommand::AddFeed(_) => None,
             ServerCommand::RemoveFeed(_) => None,
+            ServerCommand::GetFeeds => None,
             ServerCommand::Ping => Some("Pong".to_string()),
             ServerCommand::Version => Some(VERSION.to_string()),
         }
