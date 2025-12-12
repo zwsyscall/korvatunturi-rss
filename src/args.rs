@@ -1,8 +1,8 @@
 use clap::Parser;
 
 #[derive(Debug, Parser)]
-#[command(name = "rssd")]
-#[command(about = "RSS daemon", version)]
+#[command(name = "korvatunturi-rss")]
+#[command(about = "Korvatunturi RSS daemon", version)]
 pub struct Args {
     /// Path to config file
     #[arg(short, long, default_value = "config.toml")]
@@ -20,7 +20,7 @@ pub struct Args {
     #[arg(long)]
     pub check: bool,
 
-    // For communicating with a running daemon
+    /// For communicating with a running instance of self
     #[arg(long, num_args = 1..)]
     pub cli: Vec<String>,
 }
